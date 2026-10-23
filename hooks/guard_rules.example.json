@@ -1,0 +1,18 @@
+{
+  "block": [
+    "\\bDROP\\s+(TABLE|DATABASE)\\b",
+    "\\b(volume|database|db)\\s+(delete|destroy)\\b",
+    "\\bgit\\s+push\\b.*--force\\b.*\\b(main|master)\\b"
+  ],
+  "money": [
+    "\\bdaily_budget\\b",
+    "/refunds?\\b",
+    "api\\.stripe\\.com",
+    "graph\\.facebook\\.com/.*/(adsets|campaigns|ads)\\b",
+    "\\bdiscount_?codes?\\b"
+  ],
+  "allow_wrappers": [
+    "python scripts/ads_wrapper.py",
+    "python scripts/refund_wrapper.py"
+  ]
+}
