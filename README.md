@@ -75,3 +75,7 @@ Order: email team@yomachichi.com with the subject "guardrail review"; you get a 
 ## License
 
 MIT. See `LICENSE`.
+
+---
+
+More tools / hire us: https://yomachichi.github.io
