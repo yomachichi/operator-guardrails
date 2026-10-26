@@ -2,7 +2,7 @@
   "block": [
     "\\bDROP\\s+(TABLE|DATABASE)\\b",
     "\\b(volume|database|db)\\s+(delete|destroy)\\b",
-    "\\bgit\\s+push\\b.*--force\\b.*\\b(main|master)\\b"
+    "\\bgit\\s+push\\b(?=.*(--force\\b|\\s-f\\b))(?=.*\\b(main|master)\\b)"
   ],
   "money": [
     "\\bdaily_budget\\b",
