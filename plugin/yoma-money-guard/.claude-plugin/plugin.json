@@ -1,0 +1,11 @@
+{
+  "name": "yoma-money-guard",
+  "displayName": "Yoma Money Guard",
+  "version": "0.1.0",
+  "description": "PreToolUse hook that blocks money-moving and destructive shell commands (ad budget edits, refunds, Stripe calls, discount codes, DROP DATABASE) unless they run through a wrapper you approve. A STOP file in the project halts every money command. Standard-library Python, no network.",
+  "author": { "name": "Yoma (YomaChichi)", "url": "https://github.com/yomachichi" },
+  "homepage": "https://github.com/yomachichi/operator-guardrails",
+  "repository": "https://github.com/yomachichi/operator-guardrails",
+  "license": "MIT",
+  "keywords": ["guardrails", "hooks", "safety", "spend-cap", "agents"]
+}
