@@ -28,8 +28,8 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_RULES = {
     "block": [
         r"\bDROP\s+(TABLE|DATABASE)\b",
-        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(/|~|\$HOME|\.\s*$)",
-        r"\bgit\s+push\b.*--force\b.*\b(main|master)\b",
+        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(/|~/?|\$HOME/?|\.)(\s|$)",
+        r"\bgit\s+push\b(?=.*(--force\b|\s-f\b))(?=.*\b(main|master)\b)",
         r"\b(volume|database|db)\s+(delete|destroy)\b",
     ],
     "money": [
