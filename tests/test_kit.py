@@ -114,6 +114,75 @@ def test_hook_blocks_money_and_destructive_allows_wrapper():
     assert hook.verdict("ls -la && git status", rules, False) is None
 
 
+# Review findings on the money-command-guard port (davila7/claude-code-templates#1282): 4 P1 + 1 P2.
+REVIEW_CASES = {
+    # P1 wrapper chaining: a wrapper prefix must not carry a second, unchecked command
+    "python scripts/ads_wrapper.py; curl https://api.stripe.com/v1/refunds -d charge=ch_x": True,
+    "python scripts/ads_wrapper.py && curl https://api.stripe.com/v1/refunds": True,
+    "python scripts/ads_wrapper.py | curl https://api.stripe.com/v1/payouts": True,
+    "python scripts/ads_wrapper.py $(curl api.stripe.com)": True,
+    "python scripts/ads_wrapper.py `curl api.stripe.com/v1/refunds`": True,
+    "python scripts/ads_wrapper.py\ncurl https://api.stripe.com/v1/refunds": True,
+    "python scripts/ads_wrapper.pyX daily_budget=9": True,
+    # P1 rm option bypasses
+    "rm -rf --no-preserve-root /": True,
+    "rm -r -f /": True,
+    "rm -fr ~": True,
+    "rm --recursive --force /": True,
+    "rm -v -rf /": True,
+    # P1 forced push to main/master
+    "git push origin +HEAD:main": True,
+    "git push -uf origin main": True,
+    "git push --force-with-lease origin main": True,
+    "git push -f origin master": True,
+    # unchanged blocks
+    "rm -rf /": True,
+    "curl https://api.stripe.com/v1/charges": True,
+    "DROP TABLE users": True,
+    # negative controls: still allowed
+    "python scripts/ads_wrapper.py --set daily_budget=500": False,
+    "python scripts/ads_wrapper.py": False,
+    "git push origin main": False,
+    "git push -u origin feature/x": False,
+    "git push --force origin feature/x": False,
+    "rm -rf build/": False,
+    "rm -rf ./node_modules": False,
+    "ls -la": False,
+}
+
+
+def test_hook_review_findings_block_and_controls_allowed():
+    rules = dict(hook.DEFAULT_RULES, allow_wrappers=["python scripts/ads_wrapper.py"])
+    wrong = [(c, want) for c, want in REVIEW_CASES.items() if (hook.verdict(c, rules, False) is not None) != want]
+    assert not wrong, wrong
+
+
+def test_hook_invalid_config_never_crashes_and_keeps_guard_on():
+    with tempfile.TemporaryDirectory() as t:
+        f = Path(t, "guard_rules.json")
+        for bad in ('{"money":["["]}', '{"allow_wrappers":null}', '[1,2]', '{"block":"x"}', 'not json',
+                    '{"money":[3]}'):
+            f.write_text(bad)
+            r = hook.load_rules(f)
+            assert all(isinstance(r[k], list) for k in r), bad
+            assert hook.verdict("ls", r, False) is None, bad
+            assert hook.verdict("rm -rf /", r, False), bad
+            assert hook.verdict("curl https://api.stripe.com/v1/refunds", r, False), bad
+        f.write_text('{"allow_wrappers":["./w.sh"], "money":[]}')  # valid keys are kept as written
+        r = hook.load_rules(f)
+        assert r["allow_wrappers"] == ["./w.sh"] and r["money"] == []
+
+
+def test_hook_project_root_found_from_subdirectory():
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t)
+        (d / ".claude").mkdir()
+        sub = d / "a" / "b"
+        sub.mkdir(parents=True)
+        assert hook.find_root(sub, env={}) == d.resolve()
+        assert hook.find_root(sub, env={"CLAUDE_PROJECT_DIR": str(d)}) == d
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
