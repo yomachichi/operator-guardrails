@@ -12,14 +12,21 @@ the built-in defaults below. Keys (same as the repo's hooks/guard_rules.example.
   "block":  regexes that are always refused (e.g. dropping a production database)
   "money":  regexes for calls that spend money (ads budget edits, paid API scripts, refunds)
   "allow_wrappers": command prefixes that are allowed to do money things because they call
-                    money_gate.Gate.spend() themselves (e.g. "python scripts/ads_wrapper.py")
-A STOP file in the project root halts every money command at once.
+                    money_gate.Gate.spend() themselves (e.g. "python scripts/ads_wrapper.py").
+                    A wrapper only approves a single plain command: if anything is chained after it
+                    (; && || |, backticks, $( ), redirects, newlines) it is not treated as a wrapper.
+Any key left out of the file, or holding an invalid value (not a list of strings, or a regex that
+does not compile), keeps its default.
+A STOP file in the project root halts every money command at once. The project root is
+$CLAUDE_PROJECT_DIR when Claude Code sets it, else the nearest parent of the working directory
+holding .claude/ or .git, so a `cd` into a subdirectory never loses the rules or the STOP file.
 
 Installed by the plugin's hooks/hooks.json (PreToolUse, matcher Bash). Nothing is sent anywhere.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -28,8 +35,13 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_RULES = {
     "block": [
         r"\bDROP\s+(TABLE|DATABASE)\b",
-        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(/|~/?|\$HOME/?|\.)(\s|$)",
-        r"\bgit\s+push\b(?=.*(--force\b|\s-f\b))(?=.*\b(main|master)\b)",
+        r"--no-preserve-root\b",
+        # rm with a recursive flag anywhere among its options (-rf, -r -f, -fr, --recursive, extra
+        # options in between) aimed at / ~ $HOME or .
+        r"\brm\b(?=[^;&|\n]*\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b)(?=[^;&|\n]*\s(/|~/?|\$HOME/?|\.)(\s|$))",
+        # forced push to main/master: --force, --force-with-lease, any short-flag group containing f
+        # (-f, -uf), or a +refspec (+HEAD:main)
+        r"\bgit\s+push\b(?=[^;&|\n]*(--force|\s-[a-zA-Z]*f[a-zA-Z]*\b|\s\+\S*))(?=[^;&|\n]*\b(main|master)\b)",
         r"\b(volume|database|db)\s+(delete|destroy)\b",
     ],
     "money": [
@@ -41,15 +53,51 @@ DEFAULT_RULES = {
 }
 
 
-def load_rules(path: Path | None = None) -> dict:
-    p = path or HERE / "guard_rules.json"
-    if p.exists():
+CHAIN = re.compile(r"[;&|`<>\n]|\$\(")
+
+
+def _valid_list(value, compile_rx: bool) -> bool:
+    if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
+        return False
+    if compile_rx:
         try:
-            rules = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return DEFAULT_RULES  # a broken rules file falls back to the defaults, never to "allow all"
-        return {k: rules.get(k, DEFAULT_RULES[k]) for k in DEFAULT_RULES}
-    return DEFAULT_RULES
+            for x in value:
+                re.compile(x)
+        except re.error:
+            return False
+    return True
+
+
+def load_rules(path: Path | None = None) -> dict:
+    """Never raises. Missing, unreadable or non-object file -> defaults; an invalid key (wrong type,
+    bad regex) -> that key's default, so a typo can never switch the guard off or crash every call."""
+    p = path or HERE / "guard_rules.json"
+    try:
+        if not p.exists():
+            return DEFAULT_RULES
+        rules = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return DEFAULT_RULES  # a broken rules file falls back to the defaults, never to "allow all"
+    if not isinstance(rules, dict):
+        return DEFAULT_RULES
+    out = {}
+    for key, default in DEFAULT_RULES.items():
+        value = rules.get(key, default)
+        ok = value == [] or _valid_list(value, compile_rx=(key != "allow_wrappers"))
+        out[key] = value if ok else default
+    return out
+
+
+def find_root(cwd, env=None) -> Path:
+    """$CLAUDE_PROJECT_DIR if set, else the nearest parent of cwd holding .claude/ or .git, else cwd."""
+    env = os.environ if env is None else env
+    if env.get("CLAUDE_PROJECT_DIR"):
+        return Path(env["CLAUDE_PROJECT_DIR"])
+    here = Path(cwd or ".").resolve()
+    for d in (here, *here.parents):
+        if (d / ".claude").is_dir() or (d / ".git").exists():
+            return d
+    return here
 
 
 def verdict(command: str, rules: dict, stop_exists: bool) -> str | None:
@@ -58,7 +106,9 @@ def verdict(command: str, rules: dict, stop_exists: bool) -> str | None:
         if re.search(rx, command, re.IGNORECASE):
             return f"BLOCKED (destructive pattern /{rx}/). Ask the human; do not look for a workaround."
     stripped = command.strip()
-    is_wrapper = any(stripped.startswith(w) for w in rules["allow_wrappers"])
+    # a wrapper approves ONE plain command; anything chained after it would otherwise ride along unchecked
+    is_wrapper = not CHAIN.search(stripped) and any(
+        stripped == w or stripped.startswith(w + " ") for w in rules["allow_wrappers"])
     if is_wrapper and stop_exists:  # a wrapper is a money command by definition
         return "BLOCKED: STOP file present; every money action is halted until a human removes it."
     for rx in rules["money"]:
@@ -80,7 +130,7 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = (event.get("tool_input") or {}).get("command", "")
-    root = Path(event.get("cwd") or ".")
+    root = find_root(event.get("cwd"))
     reason = verdict(command, load_rules(root / ".claude" / "money-guard.json"), (root / "STOP").exists())
     if reason:
         print(reason, file=sys.stderr)
